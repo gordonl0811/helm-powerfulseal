@@ -1,0 +1,63 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-sealpolicy
+  namespace: {{ .Release.Namespace }}
+data:
+  policy.yml: {{ toYaml .Values.powerfulseal.policies | indent 4}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    matchLabels:
+      name: {{ .Release.Name }}-{{ .Chart.Name }}
+      release: {{ .Release.Name }}
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        name: {{ .Release.Name }}-{{ .Chart.Name }}
+        release: {{ .Release.Name }}
+      annotations:
+        prometheus.io/scrape: 'false'
+        # prometheus.io/port: '9000'
+    spec:
+      serviceAccountName: {{ .Release.Name }}-{{ .Chart.Name }}-serviceaccount
+      containers:
+        - name: {{ .Release.Name }}-{{ .Chart.Name }}
+          imagePullPolicy: {{ .Values.powerfulseal.image.imagePullPolicy }}
+          image: {{ .Values.powerfulseal.image.repository }}:{{ .Values.powerfulseal.image.tag }}
+          args:
+          - autonomous
+          - --policy-file=/policy.yml
+          {{ range .Values.powerfulseal.args }}
+          - {{ . }}
+          {{ end }}
+          # - --prometheus-collector
+          env:
+          # in order to allow PowerfulSeal to not accidentally self-destruct
+          # give it the pod name
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.name
+          # and the host ip
+          - name: HOST_IP
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: status.hostIP
+          volumeMounts:
+            - name: policyfile
+              mountPath: /policy.yml
+              subPath: policy.yml
+      volumes:
+        - name: policyfile
+          configMap:
+            name: {{ .Release.Name }}-{{ .Chart.Name }}-sealpolicy
